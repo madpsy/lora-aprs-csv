@@ -7,10 +7,13 @@ import csv
 import ssl
 import threading
 import time
-from typing import List, Dict
+from datetime import datetime
 import paho.mqtt.client as mqtt
 
 def parse_arguments():
+    """
+    Parse command-line arguments.
+    """
     parser = argparse.ArgumentParser(description='MQTT to CSV Converter')
     parser.add_argument('callsign', type=str, help='RX callsign to subscribe to')
     parser.add_argument('--host', type=str, default='hydros.link9.net', help='MQTT broker host')
@@ -21,22 +24,32 @@ def parse_arguments():
     return parser.parse_args()
 
 class MQTTToCSV:
+    """
+    MQTT to CSV Converter Class
+    """
     def __init__(self, broker_host: str, broker_port: int, topic: str, callsign: str,
-                 username: str = None, password: str = None, output_file: str = 'lora-syslog.csv'):
+                 username: str = None, password: str = None):
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.base_topic = topic
         self.callsign = callsign
         self.username = username
         self.password = password
-        self.output_file = output_file
 
+        # Generate timestamp for filename
+        start_time = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+        self.output_file = f"{self.callsign}-{start_time}.csv"
+
+        # Initialize MQTT client with WebSockets transport
         self.client = mqtt.Client(transport="websockets")
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
 
         self.headers_written = False
         self.lock = threading.Lock()
+
+        # Initialize remaining_keys as empty list
+        self.remaining_keys = []
 
         # Open the CSV file in write mode to empty it at the start
         try:
@@ -49,15 +62,18 @@ class MQTTToCSV:
         # CSV writer for stdout
         self.csv_stdout_writer = csv.writer(sys.stdout)
 
-        # If authentication is required
+        # Set MQTT credentials if provided
         if self.username and self.password:
             self.client.username_pw_set(self.username, self.password)
 
-        # Set TLS/SSL parameters if needed
+        # Set TLS/SSL parameters (Insecure for demonstration; secure in production)
         self.client.tls_set(cert_reqs=ssl.CERT_NONE)
         self.client.tls_insecure_set(True)
 
     def on_connect(self, client, userdata, flags, rc):
+        """
+        Callback when the client connects to the broker.
+        """
         if rc == 0:
             subscribe_topic = f"{self.base_topic}/{self.callsign}/+/json_message"
             client.subscribe(subscribe_topic)
@@ -68,6 +84,9 @@ class MQTTToCSV:
             sys.exit(1)
 
     def on_message(self, client, userdata, msg):
+        """
+        Callback when a message is received from the broker.
+        """
         try:
             payload = msg.payload.decode('utf-8')
             data = json.loads(payload)
@@ -125,6 +144,9 @@ class MQTTToCSV:
             print(f"Error processing message: {e}", file=sys.stderr)
 
     def start(self):
+        """
+        Connect to the MQTT broker and start the network loop.
+        """
         try:
             self.client.connect(self.broker_host, self.broker_port, keepalive=60)
         except Exception as e:
@@ -145,6 +167,9 @@ class MQTTToCSV:
             self.file_handle.close()
 
 def main():
+    """
+    Main function to parse arguments and start the MQTT to CSV converter.
+    """
     args = parse_arguments()
     mqtt_to_csv = MQTTToCSV(
         broker_host=args.host,
@@ -152,8 +177,7 @@ def main():
         topic=args.topic,
         callsign=args.callsign,
         username=args.username,
-        password=args.password,
-        output_file='lora-syslog.csv'  # Specify the output file name
+        password=args.password
     )
     mqtt_to_csv.start()
 
